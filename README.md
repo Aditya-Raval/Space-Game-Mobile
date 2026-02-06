@@ -1,3 +1,6 @@
-# space_game
+# Space Game
+Mobile Client written in dart for the space game. It is maintained to the state that the browser based client is to. It is crossplay Compatible.
 
-A new Flutter project.
+## This is made as part of CS2422 Mobile App Development Course At NIT Andhra Pradesh
+
+
