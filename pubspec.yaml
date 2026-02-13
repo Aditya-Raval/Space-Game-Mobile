@@ -1,21 +1,21 @@
-name: space_game_flutter
-description: A Flutter space game client
+name: space_game
+description: A multiplayer space game built with Flutter
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=2.19.0 <4.0.0'
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  web_socket_channel: ^2.4.0
-  http: ^1.1.0
+  web_socket_channel: ^3.0.0
+  http: ^1.2.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.0
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
