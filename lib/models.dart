@@ -19,13 +19,13 @@ class Player {
 
   factory Player.fromJson(Map<String, dynamic> json) {
     return Player(
-      id: json['id'] ?? '',
+      id: json['id']?.toString() ?? '',
       x: (json['x'] ?? 0).toDouble(),
       y: (json['y'] ?? 0).toDouble(),
       rot: (json['rot'] ?? 0).toDouble(),
-      fuel: json['fuel'] ?? 0,
-      credits: json['credits'] ?? 0,
-      username: json['username'] ?? '',
+      fuel: (json['fuel'] ?? 0) is int ? json['fuel'] : (json['fuel'] ?? 0).toInt(),
+      credits: (json['credits'] ?? 0) is int ? json['credits'] : (json['credits'] ?? 0).toInt(),
+      username: json['username']?.toString() ?? '',
     );
   }
 }
@@ -51,13 +51,13 @@ class Planet {
 
   factory Planet.fromJson(Map<String, dynamic> json) {
     return Planet(
-      id: json['id'] ?? '',
+      id: json['id']?.toString() ?? '',
       x: (json['x'] ?? 0).toDouble(),
       y: (json['y'] ?? 0).toDouble(),
       r: (json['r'] ?? 0).toDouble(),
-      name: json['name'] ?? '',
-      owner: json['owner'],
-      ownerUsername: json['ownerUsername'],
+      name: json['name']?.toString() ?? '',
+      owner: json['owner']?.toString(),
+      ownerUsername: json['ownerUsername']?.toString(),
     );
   }
 }

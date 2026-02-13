@@ -102,41 +102,55 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     try {
       final data = jsonDecode(message);
       final type = data['type'];
+      
+      debugPrint('Received message type: $type');
 
       if (type == 'init') {
         setState(() {
           _myId = data['id'];
           _myName = data['username'] ?? _myId ?? widget.username;
         });
+        debugPrint('Initialized with ID: $_myId, Name: $_myName');
       } else if (type == MessageTypes.msgState) {
         final payload = data['payload'];
-        setState(() {
-          _players = (payload['players'] as List)
-              .map((p) => Player.fromJson(p))
-              .toList();
-          _planets = (payload['planets'] as List)
-              .map((p) => Planet.fromJson(p))
-              .toList();
+        
+        try {
+          final playersList = payload['players'] as List?;
+          final planetsList = payload['planets'] as List?;
+          
+          debugPrint('Players count: ${playersList?.length ?? 0}, Planets count: ${planetsList?.length ?? 0}');
+          
+          setState(() {
+            _players = (playersList ?? [])
+                .map((p) => Player.fromJson(p as Map<String, dynamic>))
+                .toList();
+            _planets = (planetsList ?? [])
+                .map((p) => Planet.fromJson(p as Map<String, dynamic>))
+                .toList();
 
-          final myPlayer = _players.firstWhere(
-            (p) => p.id == _myId,
-            orElse: () => Player(
-              id: '',
-              x: 0,
-              y: 0,
-              rot: 0,
-              fuel: _myFuel,
-              credits: _myCredits,
-              username: _myName,
-            ),
-          );
+            final myPlayer = _players.firstWhere(
+              (p) => p.id == _myId,
+              orElse: () => Player(
+                id: '',
+                x: 0,
+                y: 0,
+                rot: 0,
+                fuel: _myFuel,
+                credits: _myCredits,
+                username: _myName,
+              ),
+            );
 
-          if (myPlayer.id.isNotEmpty) {
-            _myFuel = myPlayer.fuel;
-            _myCredits = myPlayer.credits;
-            _myName = myPlayer.username;
-          }
-        });
+            if (myPlayer.id.isNotEmpty) {
+              _myFuel = myPlayer.fuel;
+              _myCredits = myPlayer.credits;
+              _myName = myPlayer.username;
+            }
+          });
+        } catch (e) {
+          debugPrint('Error parsing state: $e');
+          debugPrint('Payload: $payload');
+        }
       } else if (type == MessageTypes.msgLandingPrompt) {
         setState(() {
           _landingPrompt = LandingPrompt.fromJson(data);
@@ -169,8 +183,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           _showNotification(data['error'] ?? 'Failed', Colors.red);
         }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('Error handling message: $e');
+      debugPrint('Stack trace: $stackTrace');
+      debugPrint('Message: $message');
     }
   }
 
@@ -261,6 +277,65 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 myId: _myId,
               ),
               size: Size.infinite,
+            ),
+            
+            // Debug info (top right)
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  border: Border.all(color: Colors.yellow, width: 1),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Debug Info',
+                      style: TextStyle(
+                        color: Colors.yellow,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    Text(
+                      'Players: ${_players.length}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    Text(
+                      'Planets: ${_planets.length}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    Text(
+                      'My ID: ${_myId ?? "null"}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    Text(
+                      'WS: ${_channel.closeCode == null ? "Connected" : "Closed"}',
+                      style: TextStyle(
+                        color: _channel.closeCode == null ? Colors.green : Colors.red,
+                        fontSize: 9,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
             
             // HUD Panel
