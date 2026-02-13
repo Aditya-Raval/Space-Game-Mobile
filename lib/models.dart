@@ -14,7 +14,7 @@ class Player {
     required this.rot,
     required this.fuel,
     required this.credits,
-    required this.username,
+    this.username = '',
   });
 
   factory Player.fromJson(Map<String, dynamic> json) {
@@ -25,10 +25,11 @@ class Player {
       rot: (json['rot'] ?? 0).toDouble(),
       fuel: (json['fuel'] ?? 0) is int ? json['fuel'] : (json['fuel'] ?? 0).toInt(),
       credits: (json['credits'] ?? 0) is int ? json['credits'] : (json['credits'] ?? 0).toInt(),
-      username: json['username']?.toString() ?? '',
+      username: json['username']?.toString() ?? json['id']?.toString() ?? '',
     );
   }
 }
+
 
 class Planet {
   final String id;

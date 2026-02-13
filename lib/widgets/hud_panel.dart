@@ -20,7 +20,7 @@ class HudPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fuelPercent = ((fuel / maxFuel) * 100).floor();
+    final fuelPercent = ((fuel / maxFuel) * 1000).floor();
     
     Color fuelBarColor;
     if (fuelPercent > 50) {

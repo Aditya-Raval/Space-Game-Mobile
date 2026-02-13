@@ -64,15 +64,23 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   void _connectWebSocket() {
     try {
+      debugPrint('=== WEBSOCKET CONNECTION ===');
+      debugPrint('Connecting to: ${GameConstants.wsUrl}');
+      debugPrint('Player ID: ${widget.playerId}');
+      debugPrint('Username: ${widget.username}');
+      
       _channel = WebSocketChannel.connect(
         Uri.parse(GameConstants.wsUrl),
       );
 
       // Send auth message
-      _channel.sink.add(jsonEncode({
+      final authMessage = jsonEncode({
         'type': 'auth',
         'payload': {'playerId': widget.playerId},
-      }));
+      });
+      
+      debugPrint('Sending auth message: $authMessage');
+      _channel.sink.add(authMessage);
 
       // Start input timer
       _inputTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
@@ -93,8 +101,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           debugPrint('WebSocket closed');
         },
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('WebSocket connection error: $e');
+      debugPrint('Stack trace: $stackTrace');
     }
   }
 
@@ -124,9 +133,35 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             _players = (playersList ?? [])
                 .map((p) => Player.fromJson(p as Map<String, dynamic>))
                 .toList();
-            _planets = (planetsList ?? [])
+            
+            // Parse planets - server sends them without owner info, we need to track it client-side
+            final newPlanets = (planetsList ?? [])
                 .map((p) => Planet.fromJson(p as Map<String, dynamic>))
                 .toList();
+            
+            // Preserve owner information from previous state or update from new data
+            for (var i = 0; i < newPlanets.length; i++) {
+              final newPlanet = newPlanets[i];
+              final existingPlanet = _planets.firstWhere(
+                (p) => p.id == newPlanet.id,
+                orElse: () => newPlanet,
+              );
+              
+              // If the new planet data has owner info, use it; otherwise keep existing
+              if (newPlanet.owner == null && existingPlanet.owner != null) {
+                newPlanets[i] = Planet(
+                  id: newPlanet.id,
+                  x: newPlanet.x,
+                  y: newPlanet.y,
+                  r: newPlanet.r,
+                  name: newPlanet.name,
+                  owner: existingPlanet.owner,
+                  ownerUsername: existingPlanet.ownerUsername,
+                );
+              }
+            }
+            
+            _planets = newPlanets;
 
             final myPlayer = _players.firstWhere(
               (p) => p.id == _myId,
@@ -144,7 +179,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             if (myPlayer.id.isNotEmpty) {
               _myFuel = myPlayer.fuel;
               _myCredits = myPlayer.credits;
-              _myName = myPlayer.username;
+              if (myPlayer.username.isNotEmpty) {
+                _myName = myPlayer.username;
+              }
             }
           });
         } catch (e) {
@@ -152,17 +189,79 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           debugPrint('Payload: $payload');
         }
       } else if (type == MessageTypes.msgLandingPrompt) {
+        final promptData = LandingPrompt.fromJson(data);
+        
+        // Update planet ownership from landing prompt if available
+        if (data['isOwned'] == true && data['owner'] != null) {
+          setState(() {
+            final planetIndex = _planets.indexWhere((p) => p.id == promptData.planetId);
+            if (planetIndex != -1) {
+              final oldPlanet = _planets[planetIndex];
+              final ownerId = data['isOwner'] == true ? _myId : null;
+              _planets[planetIndex] = Planet(
+                id: oldPlanet.id,
+                x: oldPlanet.x,
+                y: oldPlanet.y,
+                r: oldPlanet.r,
+                name: oldPlanet.name,
+                owner: ownerId ?? oldPlanet.owner,
+                ownerUsername: data['owner']?.toString(),
+              );
+            }
+          });
+        }
+        
         setState(() {
-          _landingPrompt = LandingPrompt.fromJson(data);
+          _landingPrompt = promptData;
         });
       } else if (type == MessageTypes.msgClaimResponse) {
         if (data['success'] == true) {
-          if (data['planetId'] != null) {
+          final planetId = data['planetId'];
+          final message = data['message'] ?? 'Success!';
+          
+          if (planetId != null) {
             setState(() {
-              _ownedPlanets.add(data['planetId']);
+              // Check if this is a revoke (message contains "Revoked") or claim
+              if (message.contains('Revoked')) {
+                // Remove from owned planets
+                _ownedPlanets.remove(planetId);
+                
+                // Update planet to remove ownership
+                final planetIndex = _planets.indexWhere((p) => p.id == planetId);
+                if (planetIndex != -1) {
+                  final oldPlanet = _planets[planetIndex];
+                  _planets[planetIndex] = Planet(
+                    id: oldPlanet.id,
+                    x: oldPlanet.x,
+                    y: oldPlanet.y,
+                    r: oldPlanet.r,
+                    name: oldPlanet.name,
+                    owner: null,
+                    ownerUsername: null,
+                  );
+                }
+              } else {
+                // Add to owned planets
+                _ownedPlanets.add(planetId);
+                
+                // Update the planet in our local list to show ownership
+                final planetIndex = _planets.indexWhere((p) => p.id == planetId);
+                if (planetIndex != -1) {
+                  final oldPlanet = _planets[planetIndex];
+                  _planets[planetIndex] = Planet(
+                    id: oldPlanet.id,
+                    x: oldPlanet.x,
+                    y: oldPlanet.y,
+                    r: oldPlanet.r,
+                    name: oldPlanet.name,
+                    owner: _myId,
+                    ownerUsername: _myName,
+                  );
+                }
+              }
             });
           }
-          _showNotification(data['message'] ?? 'Success!', Colors.green);
+          _showNotification(message, Colors.green);
           setState(() {
             _landingPrompt = null;
           });
