@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -12,6 +13,22 @@ import '../widgets/hud_panel.dart';
 import '../widgets/landing_dialog.dart';
 import '../widgets/notification_overlay.dart';
 import '../widgets/mobile_controls.dart';
+
+class Star {
+  final double x;
+  final double y;
+  final double radius;
+  final double opacity;
+  final double parallax;
+
+  const Star({
+    required this.x,
+    required this.y,
+    required this.radius,
+    required this.opacity,
+    required this.parallax,
+  });
+}
 
 class GameScreen extends StatefulWidget {
   final String playerId;
@@ -30,7 +47,7 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   late WebSocketChannel _channel;
   late AnimationController _animationController;
-  
+
   List<Player> _players = [];
   List<Planet> _planets = [];
   String? _myId;
@@ -39,27 +56,79 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   int _myCredits = 0;
   LandingPrompt? _landingPrompt;
   List<String> _ownedPlanets = [];
-  
+
   final InputState _input = InputState();
   Timer? _inputTimer;
-  
-  final GlobalKey<NotificationOverlayState> _notificationKey = 
+
+  final GlobalKey<NotificationOverlayState> _notificationKey =
       GlobalKey<NotificationOverlayState>();
+
+  // Ship images
+  ui.Image? _shipIdleImage;
+  ui.Image? _shipThrustImage;
+  ui.Image? _otherShipImage;
+
+  // Stars
+  List<Star> _stars = [];
 
   @override
   void initState() {
     super.initState();
     _myName = widget.username;
+    _generateStars();
+    _loadImages();
     _connectWebSocket();
-    
+
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 16),
     )..repeat();
-    
+
     _animationController.addListener(() {
       setState(() {});
     });
+  }
+
+  void _generateStars() {
+    final rng = Random(42); // fixed seed = consistent starfield
+    const int count = 300;
+    const double worldSize = 6000.0;
+
+    _stars = List.generate(count, (_) {
+      final layer = rng.nextInt(3); // 0=far, 1=mid, 2=near
+      return Star(
+        x: rng.nextDouble() * worldSize - worldSize / 2,
+        y: rng.nextDouble() * worldSize - worldSize / 2,
+        radius: layer == 0 ? 0.8 : layer == 1 ? 1.2 : 1.8,
+        opacity: 0.3 + rng.nextDouble() * 0.7,
+        parallax: layer == 0 ? 0.15 : layer == 1 ? 0.4 : 0.75,
+      );
+    });
+  }
+
+  Future<ui.Image> _loadImage(String assetPath) async {
+    final data = await rootBundle.load(assetPath);
+    final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+    final frame = await codec.getNextFrame();
+    return frame.image;
+  }
+
+  Future<void> _loadImages() async {
+    try {
+      final idle = await _loadImage('assets/ships/player_ship_idle.png');
+      final thrust = await _loadImage('assets/ships/player_ship.png');
+      final other = await _loadImage('assets/ships/other_ship_idle.png');
+      debugPrint('Images loaded successfully');
+      if (mounted) {
+        setState(() {
+          _shipIdleImage = idle;
+          _shipThrustImage = thrust;
+          _otherShipImage = other;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading ship images: $e');
+    }
   }
 
   void _connectWebSocket() {
@@ -68,21 +137,19 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       debugPrint('Connecting to: ${GameConstants.wsUrl}');
       debugPrint('Player ID: ${widget.playerId}');
       debugPrint('Username: ${widget.username}');
-      
+
       _channel = WebSocketChannel.connect(
         Uri.parse(GameConstants.wsUrl),
       );
 
-      // Send auth message
       final authMessage = jsonEncode({
         'type': 'auth',
         'payload': {'playerId': widget.playerId},
       });
-      
+
       debugPrint('Sending auth message: $authMessage');
       _channel.sink.add(authMessage);
 
-      // Start input timer
       _inputTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
         if (_channel.closeCode == null) {
           _channel.sink.add(jsonEncode({
@@ -111,8 +178,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     try {
       final data = jsonDecode(message);
       final type = data['type'];
-      
-      debugPrint('Received message type: $type');
 
       if (type == 'init') {
         setState(() {
@@ -122,32 +187,27 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         debugPrint('Initialized with ID: $_myId, Name: $_myName');
       } else if (type == MessageTypes.msgState) {
         final payload = data['payload'];
-        
+
         try {
           final playersList = payload['players'] as List?;
           final planetsList = payload['planets'] as List?;
-          
-          debugPrint('Players count: ${playersList?.length ?? 0}, Planets count: ${planetsList?.length ?? 0}');
-          
+
           setState(() {
             _players = (playersList ?? [])
                 .map((p) => Player.fromJson(p as Map<String, dynamic>))
                 .toList();
-            
-            // Parse planets - server sends them without owner info, we need to track it client-side
+
             final newPlanets = (planetsList ?? [])
                 .map((p) => Planet.fromJson(p as Map<String, dynamic>))
                 .toList();
-            
-            // Preserve owner information from previous state or update from new data
+
             for (var i = 0; i < newPlanets.length; i++) {
               final newPlanet = newPlanets[i];
               final existingPlanet = _planets.firstWhere(
                 (p) => p.id == newPlanet.id,
                 orElse: () => newPlanet,
               );
-              
-              // If the new planet data has owner info, use it; otherwise keep existing
+
               if (newPlanet.owner == null && existingPlanet.owner != null) {
                 newPlanets[i] = Planet(
                   id: newPlanet.id,
@@ -160,7 +220,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 );
               }
             }
-            
+
             _planets = newPlanets;
 
             final myPlayer = _players.firstWhere(
@@ -190,11 +250,11 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         }
       } else if (type == MessageTypes.msgLandingPrompt) {
         final promptData = LandingPrompt.fromJson(data);
-        
-        // Update planet ownership from landing prompt if available
+
         if (data['isOwned'] == true && data['owner'] != null) {
           setState(() {
-            final planetIndex = _planets.indexWhere((p) => p.id == promptData.planetId);
+            final planetIndex =
+                _planets.indexWhere((p) => p.id == promptData.planetId);
             if (planetIndex != -1) {
               final oldPlanet = _planets[planetIndex];
               final ownerId = data['isOwner'] == true ? _myId : null;
@@ -210,7 +270,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             }
           });
         }
-        
+
         setState(() {
           _landingPrompt = promptData;
         });
@@ -218,16 +278,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         if (data['success'] == true) {
           final planetId = data['planetId'];
           final message = data['message'] ?? 'Success!';
-          
+
           if (planetId != null) {
             setState(() {
-              // Check if this is a revoke (message contains "Revoked") or claim
               if (message.contains('Revoked')) {
-                // Remove from owned planets
                 _ownedPlanets.remove(planetId);
-                
-                // Update planet to remove ownership
-                final planetIndex = _planets.indexWhere((p) => p.id == planetId);
+
+                final planetIndex =
+                    _planets.indexWhere((p) => p.id == planetId);
                 if (planetIndex != -1) {
                   final oldPlanet = _planets[planetIndex];
                   _planets[planetIndex] = Planet(
@@ -241,11 +299,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   );
                 }
               } else {
-                // Add to owned planets
                 _ownedPlanets.add(planetId);
-                
-                // Update the planet in our local list to show ownership
-                final planetIndex = _planets.indexWhere((p) => p.id == planetId);
+
+                final planetIndex =
+                    _planets.indexWhere((p) => p.id == planetId);
                 if (planetIndex != -1) {
                   final oldPlanet = _planets[planetIndex];
                   _planets[planetIndex] = Planet(
@@ -330,7 +387,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   }
 
   bool get isMobile {
-    // Check if running on mobile platform
     try {
       return !kIsWeb && (Platform.isAndroid || Platform.isIOS);
     } catch (e) {
@@ -374,10 +430,15 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 players: _players,
                 planets: _planets,
                 myId: _myId,
+                thrustInput: _input.thrust,
+                shipIdleImage: _shipIdleImage,
+                shipThrustImage: _shipThrustImage,
+                otherShipImage: _otherShipImage,
+                stars: _stars,
               ),
               size: Size.infinite,
             ),
-            
+
             // Debug info (top right)
             Positioned(
               top: 10,
@@ -392,7 +453,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
+                    const Text(
                       'Debug Info',
                       style: TextStyle(
                         color: Colors.yellow,
@@ -402,7 +463,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     ),
                     Text(
                       'Players: ${_players.length}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 9,
                         fontFamily: 'monospace',
@@ -410,7 +471,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     ),
                     Text(
                       'Planets: ${_planets.length}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 9,
                         fontFamily: 'monospace',
@@ -418,7 +479,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     ),
                     Text(
                       'My ID: ${_myId ?? "null"}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 9,
                         fontFamily: 'monospace',
@@ -427,7 +488,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     Text(
                       'WS: ${_channel.closeCode == null ? "Connected" : "Closed"}',
                       style: TextStyle(
-                        color: _channel.closeCode == null ? Colors.green : Colors.red,
+                        color: _channel.closeCode == null
+                            ? Colors.green
+                            : Colors.red,
                         fontSize: 9,
                         fontFamily: 'monospace',
                       ),
@@ -436,7 +499,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 ),
               ),
             ),
-            
+
             // HUD Panel
             Positioned(
               left: 10,
@@ -450,21 +513,22 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 ownedPlanetsCount: _ownedPlanets.length,
               ),
             ),
-            
+
             // Mobile Controls (only show on mobile)
             if (isMobile)
               MobileControls(
                 onControlPressed: (key) => _handleMobileControl(key, true),
                 onControlReleased: (key) => _handleMobileControl(key, false),
               ),
-            
+
             // Landing Dialog
             if (_landingPrompt != null)
               LandingDialog(
                 prompt: _landingPrompt!,
                 myCredits: _myCredits,
                 onClaim: (planetId) {
-                  _sendMessage(MessageTypes.msgClaimPlanet, {'planetId': planetId});
+                  _sendMessage(
+                      MessageTypes.msgClaimPlanet, {'planetId': planetId});
                   setState(() => _landingPrompt = null);
                 },
                 onRefuel: (amount, isOwned) {
@@ -475,14 +539,15 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   setState(() => _landingPrompt = null);
                 },
                 onRevoke: (planetId) {
-                  _sendMessage(MessageTypes.msgRevokePlanet, {'planetId': planetId});
+                  _sendMessage(
+                      MessageTypes.msgRevokePlanet, {'planetId': planetId});
                   setState(() => _landingPrompt = null);
                 },
                 onClose: () {
                   setState(() => _landingPrompt = null);
                 },
               ),
-            
+
             // Notification overlay
             NotificationOverlay(key: _notificationKey),
           ],
@@ -496,11 +561,21 @@ class GamePainter extends CustomPainter {
   final List<Player> players;
   final List<Planet> planets;
   final String? myId;
+  final bool thrustInput;
+  final ui.Image? shipIdleImage;
+  final ui.Image? shipThrustImage;
+  final ui.Image? otherShipImage;
+  final List<Star> stars;
 
   GamePainter({
     required this.players,
     required this.planets,
     this.myId,
+    required this.thrustInput,
+    this.shipIdleImage,
+    this.shipThrustImage,
+    this.otherShipImage,
+    required this.stars,
   });
 
   @override
@@ -519,12 +594,26 @@ class GamePainter extends CustomPainter {
       orElse: () => players.first,
     );
 
-    // Apply camera transform
+    final double camX = size.width / 2 - camTarget.x;
+    final double camY = size.height / 2 - camTarget.y;
+
+    // Draw stars with parallax (screen space, before camera transform)
+    final starPaint = Paint()..style = PaintingStyle.fill;
+    for (final star in stars) {
+      final double sx = star.x + camX * star.parallax;
+      final double sy = star.y + camY * star.parallax;
+
+      // Wrap stars to always fill the viewport
+      final double wx = sx % size.width + (sx < 0 ? size.width : 0);
+      final double wy = sy % size.height + (sy < 0 ? size.height : 0);
+
+      starPaint.color = Colors.white.withOpacity(star.opacity);
+      canvas.drawCircle(Offset(wx, wy), star.radius, starPaint);
+    }
+
+    // Apply camera transform for world objects
     canvas.save();
-    canvas.translate(
-      size.width / 2 - camTarget.x,
-      size.height / 2 - camTarget.y,
-    );
+    canvas.translate(camX, camY);
 
     // Draw planets
     for (final planet in planets) {
@@ -545,7 +634,8 @@ class GamePainter extends CustomPainter {
       ..strokeWidth = 3;
 
     if (planet.owner != null) {
-      paint.color = planet.owner == myId ? const Color(0xFF00FF00) : const Color(0xFFFF00FF);
+      paint.color =
+          planet.owner == myId ? const Color(0xFF00FF00) : const Color(0xFFFF00FF);
     } else {
       paint.color = const Color(0xFF44AAFF);
     }
@@ -556,7 +646,6 @@ class GamePainter extends CustomPainter {
       paint,
     );
 
-    // Draw planet name
     final textColor = planet.owner == myId
         ? const Color(0xFF00FF00)
         : planet.owner != null
@@ -571,9 +660,9 @@ class GamePainter extends CustomPainter {
       12,
     );
 
-    // Draw owner name
     if (planet.owner != null) {
-      final ownerColor = planet.owner == myId ? const Color(0xFF00FF00) : const Color(0xFFFF00FF);
+      final ownerColor =
+          planet.owner == myId ? const Color(0xFF00FF00) : const Color(0xFFFF00FF);
       _drawText(
         canvas,
         '[${planet.ownerUsername ?? "?"}]',
@@ -585,26 +674,47 @@ class GamePainter extends CustomPainter {
   }
 
   void _drawShip(Canvas canvas, Player player) {
+    final isMe = player.id == myId;
+
+    final ui.Image? image;
+    if (isMe) {
+      image = thrustInput ? shipThrustImage : shipIdleImage;
+    } else {
+      image = otherShipImage;
+    }
+
     canvas.save();
     canvas.translate(player.x, player.y);
-    canvas.rotate(player.rot);
+    canvas.rotate(player.rot + pi / 2);
 
-    final path = Path()
-      ..moveTo(15, 0)
-      ..lineTo(-10, 8)
-      ..lineTo(-10, -8)
-      ..close();
+    if (image != null) {
+      const double size = 80;
+      canvas.drawImageRect(
+        image,
+        Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+        Rect.fromLTWH(-size / 2, -size / 2, size, size),
+        Paint(),
+      );
+    } else {
+      final path = Path()
+        ..moveTo(15, 0)
+        ..lineTo(-10, 8)
+        ..lineTo(-10, -8)
+        ..close();
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = isMe ? Colors.cyan : Colors.white,
+      );
+    }
 
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..color = player.id == myId ? Colors.cyan : Colors.white;
-
-    canvas.drawPath(path, paint);
     canvas.restore();
   }
 
-  void _drawText(Canvas canvas, String text, Offset position, Color color, double fontSize) {
+  void _drawText(Canvas canvas, String text, Offset position, Color color,
+      double fontSize) {
     final textPainter = TextPainter(
       text: TextSpan(
         text: text,
