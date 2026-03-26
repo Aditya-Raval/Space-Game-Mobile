@@ -102,11 +102,15 @@ class InputState {
   bool thrust;
   int rotate;
   bool brake;
+  bool missile;
+  bool missilePreview;
 
   InputState({
     this.thrust = false,
     this.rotate = 0,
     this.brake = false,
+    this.missile = false,
+    this.missilePreview = false,
   });
 
   Map<String, dynamic> toJson() {
@@ -114,6 +118,51 @@ class InputState {
       'thrust': thrust,
       'rotate': rotate,
       'brake': brake,
+      'missile': missile,
+      'missilePreview': missilePreview,
     };
+  }
+}
+
+class Missile {
+  final double x;
+  final double y;
+  final double rot;
+
+  Missile({
+    required this.x,
+    required this.y,
+    required this.rot,
+  });
+
+  factory Missile.fromJson(Map<String, dynamic> json) {
+    return Missile(
+      x: (json['x'] ?? 0).toDouble(),
+      y: (json['y'] ?? 0).toDouble(),
+      rot: (json['rot'] ?? 0).toDouble(),
+    );
+  }
+}
+
+class ChatMessage {
+  final String from;
+  final String text;
+  final int timestamp;
+  final bool system;
+
+  ChatMessage({
+    required this.from,
+    required this.text,
+    required this.timestamp,
+    this.system = false,
+  });
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      from: json['from'] ?? 'unknown',
+      text: json['text'] ?? '',
+      timestamp: json['ts'] ?? DateTime.now().millisecondsSinceEpoch,
+      system: json['system'] ?? false,
+    );
   }
 }

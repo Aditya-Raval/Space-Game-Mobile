@@ -44,6 +44,8 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
+
+
 class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   late WebSocketChannel _channel;
   late AnimationController _animationController;
@@ -56,6 +58,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   int _myCredits = 0;
   LandingPrompt? _landingPrompt;
   List<String> _ownedPlanets = [];
+  List<Missile> _missiles = [];
+  double _camX = 0;
+  double _camY = 0;
 
   final InputState _input = InputState();
   Timer? _inputTimer;
@@ -68,9 +73,16 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   ui.Image? _shipThrustImage;
   ui.Image? _otherShipImage;
 
+  // Planet images
+  Map<String, ui.Image?> _planetImages = {};
+
   // Stars
   List<Star> _stars = [];
 
+  List<ChatMessage> _chatMessages = [];
+  bool _showChatInput = false;
+  final TextEditingController _chatController = TextEditingController();
+  List<String> _profanityList = [];
   @override
   void initState() {
     super.initState();
@@ -78,6 +90,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _generateStars();
     _loadImages();
     _connectWebSocket();
+    _loadProfanity();
 
     _animationController = AnimationController(
       vsync: this,
@@ -87,6 +100,19 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _animationController.addListener(() {
       setState(() {});
     });
+  }
+
+  Future<void> _loadProfanity() async {
+      try {
+        final data = await rootBundle.loadString('assets/en.txt');
+        _profanityList = data
+            .split('\n')
+            .map((e) => e.trim().toLowerCase())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      } catch (e) {
+        debugPrint('Failed to load profanity list');
+      }
   }
 
   void _generateStars() {
@@ -118,12 +144,41 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       final idle = await _loadImage('assets/ships/player_ship_idle.png');
       final thrust = await _loadImage('assets/ships/player_ship.png');
       final other = await _loadImage('assets/ships/other_ship_idle.png');
-      debugPrint('Images loaded successfully');
+
+      // Load planet images
+      final planetImagePaths = [
+        'assets/planets/dryhotplanet.png',
+        'assets/planets/dryvenuslikeplanet.png',
+        'assets/planets/exoplanet.png',
+        'assets/planets/iceplanet.png',
+        'assets/planets/iceplanet_2.png',
+        'assets/planets/lava_planet.png',
+        'assets/planets/machine_world.png',
+        'assets/planets/moon.png',
+        'assets/planets/neptunlikeplanet.png',
+        'assets/planets/shattered_planet.png',
+        'assets/planets/sphereplanet.png',
+        'assets/planets/sun.png',
+      ];
+
+      final planetImages = <String, ui.Image?>{};
+      for (final path in planetImagePaths) {
+        try {
+          planetImages[path] = await _loadImage(path);
+          debugPrint('Loaded planet image: $path');
+        } catch (e) {
+          debugPrint('Error loading planet image $path: $e');
+          planetImages[path] = null;
+        }
+      }
+
+      debugPrint('Images loaded successfully. Planet images count: ${planetImages.length}');
       if (mounted) {
         setState(() {
           _shipIdleImage = idle;
           _shipThrustImage = thrust;
           _otherShipImage = other;
+          _planetImages = planetImages;
         });
       }
     } catch (e) {
@@ -184,9 +239,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           _myId = data['id'];
           _myName = data['username'] ?? _myId ?? widget.username;
         });
-        debugPrint('Initialized with ID: $_myId, Name: $_myName');
+        debugPrint('Initialized with ID: $_myId (sent: ${widget.playerId}), Name: $_myName');
       } else if (type == MessageTypes.msgState) {
         final payload = data['payload'];
+        _missiles = (payload['missiles'] ?? [])
+    .map<Missile>((m) => Missile.fromJson(m))
+    .toList();
 
         try {
           final playersList = payload['players'] as List?;
@@ -196,6 +254,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             _players = (playersList ?? [])
                 .map((p) => Player.fromJson(p as Map<String, dynamic>))
                 .toList();
+
+            debugPrint('Updated players: ${_players.map((p) => '${p.id}(${p.x.toInt()},${p.y.toInt()})').join(', ')}');
+            debugPrint('Duplicate IDs: ${_players.map((p) => p.id).toSet().length != _players.length ? "YES" : "NO"}');
 
             final newPlanets = (planetsList ?? [])
                 .map((p) => Planet.fromJson(p as Map<String, dynamic>))
@@ -338,6 +399,15 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         } else {
           _showNotification(data['error'] ?? 'Failed', Colors.red);
         }
+      } else if (type == MessageTypes.msgChat) {
+        final msg = ChatMessage.fromJson(data['payload']);
+
+        setState(() {
+          _chatMessages.add(msg);
+          if (_chatMessages.length > 50) {
+            _chatMessages.removeAt(0);
+          }
+        });
       }
     } catch (e, stackTrace) {
       debugPrint('Error handling message: $e');
@@ -358,7 +428,23 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       }));
     }
   }
+  void _sendChatMessage(String text) {
+    if (text.trim().isEmpty) return;
 
+    final lower = text.toLowerCase();
+
+    final hasProfanity = _profanityList.any((word) {
+      return RegExp(r'\b' + word + r'\b', caseSensitive: false)
+          .hasMatch(lower);
+    });
+
+    if (hasProfanity) {
+      _showNotification('Profanity blocked', Colors.red);
+      return;
+    }
+
+    _sendMessage(MessageTypes.msgChat, {'text': text});
+  }
   void _handleKeyEvent(KeyEvent event) {
     if (event is KeyDownEvent) {
       setState(() {
@@ -370,6 +456,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           _input.rotate = 1;
         } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
           _input.brake = true;
+        } else if (event.logicalKey == LogicalKeyboardKey.keyF) {
+           _input.missile = true;
         }
       });
     } else if (event is KeyUpEvent) {
@@ -381,6 +469,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           _input.rotate = 0;
         } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
           _input.brake = false;
+        } else if (event.logicalKey == LogicalKeyboardKey.keyF) {
+           _input.missile = false;
         }
       });
     }
@@ -404,6 +494,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         _input.rotate = isPressed ? 1 : 0;
       } else if (key == 's') {
         _input.brake = isPressed;
+      } else if (key == 'f') {
+        _input.missile = isPressed;
       }
     });
   }
@@ -413,6 +505,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _inputTimer?.cancel();
     _animationController.dispose();
     _channel.sink.close();
+    _chatController.dispose();
     super.dispose();
   }
 
@@ -435,6 +528,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 shipThrustImage: _shipThrustImage,
                 otherShipImage: _otherShipImage,
                 stars: _stars,
+                planetImages: _planetImages,
+                missiles: _missiles
               ),
               size: Size.infinite,
             ),
@@ -547,7 +642,86 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   setState(() => _landingPrompt = null);
                 },
               ),
+            Positioned(
+              right: 15,
+              top: 15,
+              child: MouseRegion(
+                onEnter: (_) => setState(() => _showChatInput = true),
+                onExit: (_) => setState(() => _showChatInput = false),
+                child: Container(
+                  width: 280,
+                  constraints: const BoxConstraints(maxHeight: 420),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.7),
+                    border: Border.all(color: Colors.grey),
+                  ),
+                  child: Column(
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Text(
+                          'Chat (hover to type)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
 
+                      // Messages
+                      SizedBox(
+                        height: 270,
+                        child: ListView.builder(
+                          itemCount: _chatMessages.length,
+                          itemBuilder: (_, i) {
+                            final msg = _chatMessages[i];
+                            final time = TimeOfDay.fromDateTime(
+                              DateTime.fromMillisecondsSinceEpoch(msg.timestamp),
+                            ).format(context);
+
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              child: Text(
+                                msg.system
+                                    ? '[$time] ${msg.text}'
+                                    : '[$time] ${msg.from}: ${msg.text}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontFamily: 'monospace',
+                                  color: msg.system ? Colors.orange : Colors.white,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+
+                      // Input
+                      if (_showChatInput)
+                        Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: TextField(
+                            controller: _chatController,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontFamily: 'monospace',
+                            ),
+                            decoration: const InputDecoration(
+                              hintText: 'Type message...',
+                              hintStyle: TextStyle(color: Colors.grey),
+                              border: OutlineInputBorder(),
+                            ),
+                            onSubmitted: (text) {
+                              _sendChatMessage(text);
+                              _chatController.clear();
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             // Notification overlay
             NotificationOverlay(key: _notificationKey),
           ],
@@ -566,6 +740,11 @@ class GamePainter extends CustomPainter {
   final ui.Image? shipThrustImage;
   final ui.Image? otherShipImage;
   final List<Star> stars;
+  final Map<String, ui.Image?> planetImages;
+  final List<Missile> missiles;
+
+  double _camX = 0;
+  double _camY = 0;
 
   GamePainter({
     required this.players,
@@ -576,6 +755,8 @@ class GamePainter extends CustomPainter {
     this.shipThrustImage,
     this.otherShipImage,
     required this.stars,
+    required this.planetImages,
+    required this.missiles,
   });
 
   @override
@@ -594,9 +775,16 @@ class GamePainter extends CustomPainter {
       orElse: () => players.first,
     );
 
-    final double camX = size.width / 2 - camTarget.x;
-    final double camY = size.height / 2 - camTarget.y;
+    debugPrint('Camera: myId=$myId, players count=${players.length}, camTarget=${camTarget.id} at (${camTarget.x.toInt()}, ${camTarget.y.toInt()})');
 
+    final targetX = size.width / 2 - camTarget.x;
+    final targetY = size.height / 2 - camTarget.y;
+
+    _camX += (targetX - _camX) * 0.1;
+    _camY += (targetY - _camY) * 0.1;
+
+    final camX = _camX;
+    final camY = _camY;
     // Draw stars with parallax (screen space, before camera transform)
     final starPaint = Paint()..style = PaintingStyle.fill;
     for (final star in stars) {
@@ -617,7 +805,8 @@ class GamePainter extends CustomPainter {
 
     // Draw planets
     for (final planet in planets) {
-      _drawPlanet(canvas, planet);
+      final planetImage = _getPlanetImage(planet.name);
+      _drawPlanet(canvas, planet, planetImage);
     }
 
     // Draw ships
@@ -625,26 +814,69 @@ class GamePainter extends CustomPainter {
       _drawShip(canvas, player);
     }
 
+    for (final m in missiles) {
+      _drawMissile(canvas, m);
+    }
+
     canvas.restore();
   }
 
-  void _drawPlanet(Canvas canvas, Planet planet) {
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-
-    if (planet.owner != null) {
-      paint.color =
-          planet.owner == myId ? const Color(0xFF00FF00) : const Color(0xFFFF00FF);
+  ui.Image? _getPlanetImage(String planetName) {
+    final name = planetName.toLowerCase();
+    String imagePath;
+    if (name == 'terra') {
+      imagePath = 'assets/planets/sphereplanet.png'; // Earth-like
+    } else if (name == 'mars') {
+      imagePath = 'assets/planets/dryhotplanet.png'; // Red planet
+    } else if (name == 'jupiter') {
+      imagePath = 'assets/planets/neptunlikeplanet.png'; // Gas giant
+    } else if (name == 'venus') {
+      imagePath = 'assets/planets/dryvenuslikeplanet.png'; // Venus-like
+    } else if (name == 'mercury') {
+      imagePath = 'assets/planets/moon.png'; // Small rocky planet
+    } else if (name == 'saturn') {
+      imagePath = 'assets/planets/neptunlikeplanet.png'; // Gas giant
+    } else if (name == 'uranus') {
+      imagePath = 'assets/planets/iceplanet.png'; // Ice giant
+    } else if (name == 'neptune') {
+      imagePath = 'assets/planets/iceplanet_2.png'; // Ice giant
     } else {
-      paint.color = const Color(0xFF44AAFF);
+      imagePath = 'assets/planets/sphereplanet.png'; // default
     }
+    final image = planetImages[imagePath];
+    // debugPrint('Planet $planetName -> $imagePath, image loaded: ${image != null}');
+    return image;
+  }
 
-    canvas.drawCircle(
-      Offset(planet.x, planet.y),
-      planet.r,
-      paint,
-    );
+  void _drawPlanet(Canvas canvas, Planet planet, ui.Image? planetImage) {
+    if (planetImage != null) {
+      // Draw planet image scaled by radius
+      final size = planet.r * 2; // diameter = 2 * radius
+      canvas.drawImageRect(
+        planetImage,
+        Rect.fromLTWH(0, 0, planetImage.width.toDouble(), planetImage.height.toDouble()),
+        Rect.fromLTWH(planet.x - size / 2, planet.y - size / 2, size, size),
+        Paint(),
+      );
+    } else {
+      // Fallback: draw circle if image not available
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3;
+
+      if (planet.owner != null) {
+        paint.color =
+            planet.owner == myId ? const Color(0xFF00FF00) : const Color(0xFFFF00FF);
+      } else {
+        paint.color = const Color(0xFF44AAFF);
+      }
+
+      canvas.drawCircle(
+        Offset(planet.x, planet.y),
+        planet.r,
+        paint,
+      );
+    }
 
     final textColor = planet.owner == myId
         ? const Color(0xFF00FF00)
@@ -671,6 +903,24 @@ class GamePainter extends CustomPainter {
         10,
       );
     }
+  }
+
+  void _drawMissile(Canvas canvas, Missile m) {
+    canvas.save();
+    canvas.translate(m.x, m.y);
+    canvas.rotate(m.rot);
+
+    final paint = Paint()
+      ..color = Colors.orange
+      ..strokeWidth = 2;
+
+    canvas.drawLine(
+      const Offset(-5, 0),
+      const Offset(5, 0),
+      paint,
+    );
+
+    canvas.restore();
   }
 
   void _drawShip(Canvas canvas, Player player) {

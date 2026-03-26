@@ -24,4 +24,6 @@ class MessageTypes {
   static const String msgRefuelResponse = 'refuel_response';
   static const String msgRevokePlanet = 'revoke_planet';
   static const String msgLandingPrompt = 'landing_prompt';
+  static const String msgChat = 'chat';
 }
+
