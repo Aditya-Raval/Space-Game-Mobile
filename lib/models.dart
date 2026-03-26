@@ -125,21 +125,27 @@ class InputState {
 }
 
 class Missile {
+  final String id;
   final double x;
   final double y;
-  final double rot;
+  final double vx;
+  final double vy;
 
   Missile({
+    required this.id,
     required this.x,
     required this.y,
-    required this.rot,
+    required this.vx,
+    required this.vy,
   });
 
   factory Missile.fromJson(Map<String, dynamic> json) {
     return Missile(
+      id: json['id'].toString(),
       x: (json['x'] ?? 0).toDouble(),
       y: (json['y'] ?? 0).toDouble(),
-      rot: (json['rot'] ?? 0).toDouble(),
+      vx: (json['vx'] ?? 0).toDouble(),
+      vy: (json['vy'] ?? 0).toDouble(),
     );
   }
 }
