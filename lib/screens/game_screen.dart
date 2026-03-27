@@ -79,7 +79,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   List<ChatMessage> _chatMessages = [];
   bool _showChatInput = false;
+  bool _chatOpen = false;         // whether the chat panel is visible
+  int _unreadCount = 0;           // badge counter when chat is closed
   final TextEditingController _chatController = TextEditingController();
+  final ScrollController _chatScrollController = ScrollController();
   List<String> _profanityList = [];
   @override
   void initState() {
@@ -251,7 +254,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     if (type == 'init') {
       setState(() {
         _myId = data['id'];
-        _myName = data['username'] ?? _myId ?? widget.username;
+        _myName = data['username'] ?? widget.username;
       });
     }
 
@@ -303,6 +306,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         _chatMessages.add(msg);
         if (_chatMessages.length > 50) {
           _chatMessages.removeAt(0);
+        }
+        if (!_chatOpen) _unreadCount++;
+      });
+
+      // Auto-scroll to bottom if panel is open
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_chatScrollController.hasClients) {
+          _chatScrollController.animateTo(
+            _chatScrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
         }
       });
     }
@@ -455,6 +470,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _animationController.dispose();
     _channel.sink.close();
     _chatController.dispose();
+    _chatScrollController.dispose();
     super.dispose();
   }
 
@@ -591,55 +607,164 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   setState(() => _landingPrompt = null);
                 },
               ),
+            // ── Chat icon button (top-right) ─────────────────────────────
             Positioned(
-              right: 15,
-              top: 15,
-              child: GestureDetector(
-                       onTap: () {
-                  setState(() {
-                    _showChatInput = !_showChatInput;
-                  });
-                },
-                child: FocusScope(
-                  child: Container(
-                    width: 280,
-                    constraints: const BoxConstraints(maxHeight: 420),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      border: Border.all(color: Colors.grey),
+              right: 12,
+              top: 12,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _chatOpen = !_chatOpen;
+                        if (_chatOpen) {
+                          _unreadCount = 0;
+                          // Scroll to bottom when opening
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (_chatScrollController.hasClients) {
+                              _chatScrollController.jumpTo(
+                                _chatScrollController.position.maxScrollExtent,
+                              );
+                            }
+                          });
+                        } else {
+                          _showChatInput = false;
+                        }
+                      });
+                    },
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.75),
+                        border: Border.all(
+                          color: _chatOpen
+                              ? Colors.cyanAccent
+                              : Colors.white.withOpacity(0.5),
+                          width: 1.5,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: _chatOpen
+                            ? [
+                                BoxShadow(
+                                  color: Colors.cyanAccent.withOpacity(0.35),
+                                  blurRadius: 10,
+                                  spreadRadius: 1,
+                                ),
+                              ]
+                            : [],
+                      ),
+                      child: Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        color: _chatOpen ? Colors.cyanAccent : Colors.white,
+                        size: 22,
+                      ),
                     ),
-                    child: Column(
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.all(8),
-                          child: Text(
-                            'Chat (hover to type)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontFamily: 'monospace',
-                            ),
+                  ),
+
+                  // Unread badge
+                  if (_unreadCount > 0 && !_chatOpen)
+                    Positioned(
+                      top: -4,
+                      right: -4,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.redAccent,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          _unreadCount > 9 ? '9+' : '$_unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace',
                           ),
                         ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // ── Chat panel (slides in when _chatOpen) ────────────────────
+            if (_chatOpen)
+              Positioned(
+                right: 12,
+                top: 64,
+                child: FocusScope(
+                  child: Container(
+                    width: 270,
+                    constraints: const BoxConstraints(maxHeight: 400),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.80),
+                      border: Border.all(
+                        color: Colors.cyanAccent.withOpacity(0.4),
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Header
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.chat_bubble_outline_rounded,
+                                  color: Colors.cyanAccent, size: 14),
+                              const SizedBox(width: 6),
+                              const Expanded(
+                                child: Text(
+                                  'Chat',
+                                  style: TextStyle(
+                                    color: Colors.cyanAccent,
+                                    fontSize: 12,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () =>
+                                    setState(() => _chatOpen = false),
+                                child: const Icon(Icons.close,
+                                    color: Colors.white54, size: 16),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Divider(
+                            height: 1, color: Colors.white12),
 
                         // Messages
                         SizedBox(
-                          height: 270,
+                          height: 240,
                           child: ListView.builder(
+                            controller: _chatScrollController,
                             itemCount: _chatMessages.length,
                             itemBuilder: (_, i) {
                               final msg = _chatMessages[i];
-                              final time = TimeOfDay.fromDateTime(
-                                DateTime.fromMillisecondsSinceEpoch(msg.timestamp),
+                              final time =
+                                  TimeOfDay.fromDateTime(
+                                DateTime.fromMillisecondsSinceEpoch(
+                                    msg.timestamp),
                               ).format(context);
 
                               return Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
                                 child: Text(
                                   '[$time] ${msg.from}: ${msg.text}',
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 11,
                                     fontFamily: 'monospace',
-                                    color: msg.system ? Colors.orange : Colors.white,
+                                    color: msg.system
+                                        ? Colors.orange
+                                        : Colors.white,
                                   ),
                                 ),
                               );
@@ -647,8 +772,25 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                           ),
                         ),
 
-                        // Input
-                        if (_showChatInput)
+                        // Input toggle + field
+                        const Divider(
+                            height: 1, color: Colors.white12),
+                        if (!_showChatInput)
+                          TextButton.icon(
+                            onPressed: () =>
+                                setState(() => _showChatInput = true),
+                            icon: const Icon(Icons.edit,
+                                size: 14, color: Colors.white54),
+                            label: const Text(
+                              'Type a message',
+                              style: TextStyle(
+                                color: Colors.white54,
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          )
+                        else
                           Padding(
                             padding: const EdgeInsets.all(8),
                             child: TextField(
@@ -656,25 +798,52 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                               autofocus: true,
                               style: const TextStyle(
                                 color: Colors.white,
+                                fontSize: 12,
                                 fontFamily: 'monospace',
                               ),
-                              decoration: const InputDecoration(
-                                hintText: 'Type message...',
-                                hintStyle: TextStyle(color: Colors.grey),
-                                border: OutlineInputBorder(),
+                              decoration: InputDecoration(
+                                hintText: 'Message...',
+                                hintStyle: const TextStyle(
+                                    color: Colors.white38),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 8),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: const BorderSide(
+                                      color: Colors.white24),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: const BorderSide(
+                                      color: Colors.cyanAccent),
+                                ),
+                                suffixIcon: IconButton(
+                                  icon: const Icon(Icons.send,
+                                      size: 16,
+                                      color: Colors.cyanAccent),
+                                  onPressed: () {
+                                    _sendChatMessage(
+                                        _chatController.text);
+                                    _chatController.clear();
+                                    setState(
+                                        () => _showChatInput = false);
+                                  },
+                                ),
                               ),
                               onSubmitted: (text) {
                                 _sendChatMessage(text);
                                 _chatController.clear();
+                                setState(
+                                    () => _showChatInput = false);
                               },
                             ),
                           ),
                       ],
                     ),
-                  )
                   ),
+                ),
               ),
-            ),
             // Notification overlay
             NotificationOverlay(key: _notificationKey),
           ],

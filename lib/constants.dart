@@ -10,8 +10,8 @@ class GameConstants {
   static const int planetClaimCost = 500;
   
   // Network constants
-  static const String httpBaseUrl = 'http://172.180.13.73:3000';
-  static const String wsUrl = 'ws://172.180.13.73:8080';
+  static const String httpBaseUrl = 'http://192.168.137.75:3000';
+  static const String wsUrl = 'ws://192.168.137.75:8080';
 }
 
 // Message types matching the shared messageTypes
