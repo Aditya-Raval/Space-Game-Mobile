@@ -84,6 +84,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
   List<String> _profanityList = [];
+
+  bool _leaderboardOpen = false;  // whether the leaderboard panel is visible
   @override
   void initState() {
     super.initState();
@@ -607,6 +609,228 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   setState(() => _landingPrompt = null);
                 },
               ),
+            // ── Leaderboard icon button (top-right, left of chat) ────────
+            Positioned(
+              right: 64, // 12 + 44 (chat btn) + 8 gap
+              top: 12,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _leaderboardOpen = !_leaderboardOpen;
+                    if (_leaderboardOpen) _chatOpen = false;
+                  });
+                },
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.75),
+                    border: Border.all(
+                      color: _leaderboardOpen
+                          ? Colors.amberAccent
+                          : Colors.white.withOpacity(0.5),
+                      width: 1.5,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: _leaderboardOpen
+                        ? [
+                            BoxShadow(
+                              color: Colors.amberAccent.withOpacity(0.35),
+                              blurRadius: 10,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : [],
+                  ),
+                  child: Icon(
+                    Icons.leaderboard_rounded,
+                    color: _leaderboardOpen ? Colors.amberAccent : Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Leaderboard panel (slides in when _leaderboardOpen) ───────
+            if (_leaderboardOpen)
+              Positioned(
+                right: 12,
+                top: 64,
+                child: Container(
+                  width: 270,
+                  constraints: const BoxConstraints(maxHeight: 400),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.85),
+                    border: Border.all(
+                      color: Colors.amberAccent.withOpacity(0.4),
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Header
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.leaderboard_rounded,
+                                color: Colors.amberAccent, size: 14),
+                            const SizedBox(width: 6),
+                            const Expanded(
+                              child: Text(
+                                'Leaderboard',
+                                style: TextStyle(
+                                  color: Colors.amberAccent,
+                                  fontSize: 12,
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () =>
+                                  setState(() => _leaderboardOpen = false),
+                              child: const Icon(Icons.close,
+                                  color: Colors.white54, size: 16),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1, color: Colors.white12),
+
+                      // Column headers
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        child: Row(
+                          children: const [
+                            SizedBox(
+                              width: 24,
+                              child: Text('#',
+                                  style: TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 10,
+                                    fontFamily: 'monospace',
+                                  )),
+                            ),
+                            Expanded(
+                              child: Text('Player',
+                                  style: TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 10,
+                                    fontFamily: 'monospace',
+                                  )),
+                            ),
+                            Text('Credits',
+                                style: TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 10,
+                                  fontFamily: 'monospace',
+                                )),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1, color: Colors.white12),
+
+                      // Player rows
+                      Builder(builder: (context) {
+                        final sorted = List<Player>.from(_players)
+                          ..sort((a, b) => b.credits.compareTo(a.credits));
+
+                        if (sorted.isEmpty) {
+                          return const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Text(
+                              'No players online',
+                              style: TextStyle(
+                                color: Colors.white38,
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: sorted.length,
+                          itemBuilder: (_, i) {
+                            final p = sorted[i];
+                            final isMe = p.id == _myId;
+                            final rank = i + 1;
+
+                            Color rankColor;
+                            if (rank == 1) rankColor = Colors.amberAccent;
+                            else if (rank == 2) rankColor = Colors.grey.shade300;
+                            else if (rank == 3) rankColor = const Color(0xFFCD7F32);
+                            else rankColor = Colors.white38;
+
+                            return Container(
+                              color: isMe
+                                  ? Colors.amberAccent.withOpacity(0.07)
+                                  : Colors.transparent,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 24,
+                                    child: Text(
+                                      rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : '$rank',
+                                      style: TextStyle(
+                                        color: rankColor,
+                                        fontSize: rank <= 3 ? 13 : 10,
+                                        fontFamily: 'monospace',
+                                        fontWeight: isMe
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      isMe ? '${p.username} ◀' : p.username,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: isMe
+                                            ? Colors.amberAccent
+                                            : Colors.white,
+                                        fontSize: 11,
+                                        fontFamily: 'monospace',
+                                        fontWeight: isMe
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    '\$${p.credits}',
+                                    style: TextStyle(
+                                      color: isMe
+                                          ? Colors.amberAccent
+                                          : Colors.greenAccent,
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      fontWeight: isMe
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        );
+                      }),
+                      const SizedBox(height: 4),
+                    ],
+                  ),
+                ),
+              ),
+
             // ── Chat icon button (top-right) ─────────────────────────────
             Positioned(
               right: 12,
@@ -619,6 +843,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                       setState(() {
                         _chatOpen = !_chatOpen;
                         if (_chatOpen) {
+                          _leaderboardOpen = false;
                           _unreadCount = 0;
                           // Scroll to bottom when opening
                           WidgetsBinding.instance.addPostFrameCallback((_) {
